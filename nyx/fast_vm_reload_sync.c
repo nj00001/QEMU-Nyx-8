@@ -121,49 +121,51 @@ static inline void perform_task_debug_mode(fast_vm_reload_sync_t *self,
 
 static inline void create_root_snapshot(void)
 {
-    if (GET_GLOBAL_STATE()->fast_reload_enabled) {
-        nyx_debug("===> GET_GLOBAL_STATE()->fast_reload_enabled: TRUE\n");
-        if (GET_GLOBAL_STATE()->fast_reload_mode) {
-            nyx_debug("===> GET_GLOBAL_STATE()->fast_reload_mode: TRUE\n");
-            /* we've loaded an external snapshot folder - so do nothing and don't create any new snapshot files */
-        } else {
-            nyx_debug("===> GET_GLOBAL_STATE()->fast_reload_mode: FALSE\n");
+//    if (GET_GLOBAL_STATE()->fast_reload_enabled) {
+//        nyx_debug("===> GET_GLOBAL_STATE()->fast_reload_enabled: TRUE\n");
+//        if (GET_GLOBAL_STATE()->fast_reload_mode) {
+//            nyx_debug("===> GET_GLOBAL_STATE()->fast_reload_mode: TRUE\n");
+//            /* we've loaded an external snapshot folder - so do nothing and don't create any new snapshot files */
+//        } else {
+//            nyx_debug("===> GET_GLOBAL_STATE()->fast_reload_mode: FALSE\n");
             /* store the current state as a snapshot folder */
             fast_reload_create_in_memory(get_fast_reload_snapshot());
             fast_reload_serialize_to_file(get_fast_reload_snapshot(),
                                           GET_GLOBAL_STATE()->fast_reload_path, false);
 
             serialize_root_snapshot_meta_data(GET_GLOBAL_STATE()->fast_reload_path);
-        }
-    } else {
-        nyx_debug("===> GET_GLOBAL_STATE()->fast_reload_enabled: FALSE\n");
-        /* so we haven't set a path for our snapshot files - just store everything in memory */
-        fast_reload_create_in_memory(get_fast_reload_snapshot());
-
-        /* Even if we don't serialize the snapshot we still want to have the 
-         * option to export the meta data of the root snapshot as yaml file.
-         * This might be useful for the fuzzing frontend in charge; thus it 
-         * is also up to the frontend to set a path for the snapshot directory.
-         * If the path is not set, we just skip this step.
-         */ 
-        if (GET_GLOBAL_STATE()->fast_reload_path != NULL) {
-            serialize_root_snapshot_meta_data(GET_GLOBAL_STATE()->fast_reload_path);
-        }
-    }
+//        }
+//    } else {
+//        nyx_debug("===> GET_GLOBAL_STATE()->fast_reload_enabled: FALSE\n");
+//        /* so we haven't set a path for our snapshot files - just store everything in memory */
+//        fast_reload_create_in_memory(get_fast_reload_snapshot());
+//
+//        /* Even if we don't serialize the snapshot we still want to have the
+//         * option to export the meta data of the root snapshot as yaml file.
+//         * This might be useful for the fuzzing frontend in charge; thus it
+//         * is also up to the frontend to set a path for the snapshot directory.
+//         * If the path is not set, we just skip this step.
+//         */
+//        if (GET_GLOBAL_STATE()->fast_reload_path != NULL) {
+//            serialize_root_snapshot_meta_data(GET_GLOBAL_STATE()->fast_reload_path);
+//        }
+//    }
 }
-
+bool wait_main_thread = true;
 static inline void perform_task_no_block_mode(fast_vm_reload_sync_t *self,
                                               FastReloadRequest      request)
 {
     CPUState    *cpu     = qemu_get_cpu(0);
     X86CPU      *x86_cpu = X86_CPU(cpu);
     CPUX86State *env     = &x86_cpu->env;
+    Error *err = NULL;
 
     qemu_mutex_lock_iothread();
 
     switch (request) {
     case REQUEST_SAVE_SNAPSHOT_PRE:
         vm_stop(RUN_STATE_SAVE_VM);
+        save_snapshot("test", &err);
         fast_reload_create_in_memory(get_fast_reload_snapshot());
         fast_reload_serialize_to_file(get_fast_reload_snapshot(),
                                       GET_GLOBAL_STATE()->fast_reload_pre_path, true);
@@ -176,7 +178,12 @@ static inline void perform_task_no_block_mode(fast_vm_reload_sync_t *self,
         kvm_arch_put_registers(cpu, KVM_PUT_FULL_STATE);
     case REQUEST_SAVE_SNAPSHOT_ROOT:
         kvm_arch_get_registers(cpu);
-        vm_stop(RUN_STATE_SAVE_VM);
+        save_snapshot("root", &err);
+        while (wait_main_thread){
+            sleep(1);
+        }
+        int do_vm_stop(RunState state, bool send_stop);
+        do_vm_stop(RUN_STATE_SAVE_VM, true);
         create_root_snapshot();
 
         fast_reload_restore(get_fast_reload_snapshot());
@@ -362,4 +369,8 @@ bool check_if_relood_request_exists_post(fast_vm_reload_sync_t *self)
         return true;
     }
     return false;
+}
+void set_wait()
+{
+    wait_main_thread = false;
 }

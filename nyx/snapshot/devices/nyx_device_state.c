@@ -332,6 +332,46 @@ static const QEMUFileOps fast_savevm_ops_to_buffer = {
     .close         = (QEMUFileCloseFunc *)fast_savevm_fclose_save_to_buffer
 };
 
+void nyx_device_state_init_from_snapshot2(const char *snapshot_folder)
+{
+    static bool run_one = false;
+    static void *state_file_buf = NULL;
+    static struct fast_savevm_opaque_t fast_savevm_opaque;
+
+    uint8_t ret = global_state_store();
+    assert(!ret);
+
+
+    if(run_one == false){
+        char *qemu_state_file;
+        assert(asprintf(&qemu_state_file, "%s/fast_snapshot.qemu_state",
+                        snapshot_folder) != -1);
+        struct stat buffer;
+        assert(stat(qemu_state_file, &buffer) == 0);
+
+        state_file_buf = malloc(STATE_BUFFER);
+        FILE* f;
+        f = fopen(qemu_state_file, "r");
+        assert(fread(state_file_buf, buffer.st_size, 1, f) == 1);
+        fclose(f);
+
+        fast_savevm_opaque.buf = state_file_buf;
+        fast_savevm_opaque.f   = NULL;
+        fast_savevm_opaque.pos = 0;
+
+    }
+
+
+
+    QEMUFile *file_dump    = qemu_fopen_ops(&fast_savevm_opaque, &fast_loadvm_ops);
+
+    qemu_devices_reset();
+    qemu_loadvm_state(file_dump);
+
+    free(file_dump);
+    run_one = true;
+
+}
 
 nyx_device_state_t *nyx_device_state_init_from_snapshot(const char *snapshot_folder,
                                                         bool        pre_snapshot)

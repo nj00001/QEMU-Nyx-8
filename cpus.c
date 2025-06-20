@@ -1093,7 +1093,7 @@ void cpu_synchronize_all_pre_loadvm(void)
     }
 }
 
-static int do_vm_stop(RunState state, bool send_stop)
+int do_vm_stop(RunState state, bool send_stop)
 {
     int ret = 0;
 

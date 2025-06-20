@@ -372,7 +372,7 @@ void handle_hypercall_kafl_page_dump_bp(struct kvm_run *run,
     bool success = false;
     // nyx_printf("page_cache_fetch = %lx\n",
     // page_cache_fetch(GET_GLOBAL_STATE()->page_cache, page, &success, false));
-    page_cache_fetch(GET_GLOBAL_STATE()->page_cache, page, &success, false);
+    page_cache_fetch2(GET_GLOBAL_STATE()->page_cache, page, &success);
     if (success) {
         nyx_debug("%s: SUCCESS: %d\n", __func__, success);
         kvm_remove_all_breakpoints(cpu);
