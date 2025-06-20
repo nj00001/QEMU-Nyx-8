@@ -424,6 +424,9 @@ void fast_reload_restore(fast_reload_t *self)
     bdrv_drain_all();
     memory_global_dirty_log_sync();
 
+        void nyx_device_state_init_from_snapshot2(const char *snapshot_folder);
+            nyx_device_state_init_from_snapshot2(global_state.fast_reload_path);
+
     nyx_block_snapshot_reset(self->block_state);
 
     nyx_device_state_restore(self->device_state);

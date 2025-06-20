@@ -1469,7 +1469,7 @@ int qemu_savevm_state_complete_precopy_non_iterable(QEMUFile *f,
 int qemu_savevm_state_complete_precopy(QEMUFile *f, bool iterable_only,
                                        bool inactivate_disks)
 {
-    int ret;
+    int ret = 0;
     Error *local_err = NULL;
     bool in_postcopy = migration_in_postcopy();
 
@@ -1481,25 +1481,25 @@ int qemu_savevm_state_complete_precopy(QEMUFile *f, bool iterable_only,
 
     cpu_synchronize_all_states();
 
-    if (!in_postcopy || iterable_only) {
-        ret = qemu_savevm_state_complete_precopy_iterable(f, in_postcopy);
-        if (ret) {
-            return ret;
-        }
-    }
+//    if (!in_postcopy || iterable_only) {
+//        ret = qemu_savevm_state_complete_precopy_iterable(f, in_postcopy);
+//        if (ret) {
+//            return ret;
+//        }
+//    }
+//
+//    if (iterable_only) {
+//        goto flush;
+//    }
+//
+//    ret = qemu_savevm_state_complete_precopy_non_iterable(f, in_postcopy,
+//                                                          inactivate_disks);
+//    if (ret) {
+//        return ret;
+//    }
 
-    if (iterable_only) {
-        goto flush;
-    }
-
-    ret = qemu_savevm_state_complete_precopy_non_iterable(f, in_postcopy,
-                                                          inactivate_disks);
-    if (ret) {
-        return ret;
-    }
-
-flush:
-    qemu_fflush(f);
+//flush:
+//    qemu_fflush(f);
     return 0;
 }
 
@@ -1557,9 +1557,10 @@ static int qemu_savevm_state(QEMUFile *f, Error **errp)
 int qemu_savevm_state(QEMUFile *f, Error **errp)
 #endif
 {
-    int ret;
+    int ret = 0;
     MigrationState *ms = migrate_get_current();
     MigrationStatus status;
+    Error *local_err = NULL;
 
     if (migration_is_setup_or_active(ms->state) ||
         ms->state == MIGRATION_STATUS_CANCELLING ||
@@ -1578,31 +1579,19 @@ int qemu_savevm_state(QEMUFile *f, Error **errp)
     ms->to_dst_file = f;
 
     qemu_mutex_unlock_iothread();
-    qemu_savevm_state_header(f);
     qemu_savevm_state_setup(f);
     qemu_mutex_lock_iothread();
 
-    while (qemu_file_get_error(f) == 0) {
-        if (qemu_savevm_state_iterate(f, false) > 0) {
-            break;
-        }
+    if (precopy_notify(PRECOPY_NOTIFY_COMPLETE, &local_err)) {
+        error_report_err(local_err);
     }
 
-    ret = qemu_file_get_error(f);
-    if (ret == 0) {
-        qemu_savevm_state_complete_precopy(f, false, false);
-        ret = qemu_file_get_error(f);
-    }
+    cpu_synchronize_all_states();
+
     qemu_savevm_state_cleanup();
-    if (ret != 0) {
-        error_setg_errno(errp, -ret, "Error while writing VM state");
-    }
 
-    if (ret != 0) {
-        status = MIGRATION_STATUS_FAILED;
-    } else {
-        status = MIGRATION_STATUS_COMPLETED;
-    }
+    status = MIGRATION_STATUS_COMPLETED;
+
     migrate_set_state(&ms->state, MIGRATION_STATUS_SETUP, status);
 
     /* f is outer parameter, it should not stay in global migration state after
@@ -2774,8 +2763,7 @@ int save_snapshot(const char *name, Error **errp)
         goto the_end;
     }
     ret = qemu_savevm_state(f, errp);
-    vm_state_size = qemu_ftell(f);
-    qemu_fclose(f);
+
     if (ret < 0) {
         goto the_end;
     }
@@ -2787,13 +2775,6 @@ int save_snapshot(const char *name, Error **errp)
      */
     aio_context_release(aio_context);
     aio_context = NULL;
-
-    ret = bdrv_all_create_snapshot(sn, bs, vm_state_size, &bs);
-    if (ret < 0) {
-        error_setg(errp, "Error while creating snapshot on '%s'",
-                   bdrv_get_device_name(bs));
-        goto the_end;
-    }
 
     ret = 0;
 
