@@ -19,7 +19,7 @@
 #define PAGE_CACHE_ADDR_LINE_SIZE sizeof(uint64_t)
 
 #define UNMAPPED_PAGE 0xFFFFFFFFFFFFFFFFULL
-
+void       *mmap_end = 0;
 static bool reload_addresses(page_cache_t *self)
 {
     khiter_t k;
@@ -60,6 +60,7 @@ static bool reload_addresses(page_cache_t *self)
         self->page_data = mmap(NULL, (self->num_pages) * PAGE_SIZE,
                                PROT_READ | PROT_WRITE, MAP_SHARED,
                                self->fd_page_file, 0);
+        mmap_end = self->page_data + self->num_pages * PAGE_SIZE;
 
         return true;
     }
@@ -75,12 +76,14 @@ static bool append_page(page_cache_t *self, uint64_t page, uint64_t cr3)
         self->page_data = mmap(NULL, (self->num_pages + 1) * PAGE_SIZE,
                                PROT_READ | PROT_WRITE, MAP_SHARED,
                                self->fd_page_file, 0);
+        mmap_end = self->page_data + (self->num_pages + 1) * PAGE_SIZE;
     } else {
         munmap(self->page_data, self->num_pages * PAGE_SIZE);
         assert(!ftruncate(self->fd_page_file, (self->num_pages + 1) * PAGE_SIZE));
         self->page_data = mmap(NULL, (self->num_pages + 1) * PAGE_SIZE,
                                PROT_READ | PROT_WRITE, MAP_SHARED,
                                self->fd_page_file, 0);
+        mmap_end = self->page_data + (self->num_pages + 1) * PAGE_SIZE;
     }
 
     if (!dump_page_cr3_ht(page, self->page_data + (PAGE_SIZE * self->num_pages),
@@ -98,6 +101,7 @@ static bool append_page(page_cache_t *self, uint64_t page, uint64_t cr3)
                 self->page_data = mmap(NULL, (self->num_pages) * PAGE_SIZE,
                                        PROT_READ | PROT_WRITE, MAP_SHARED,
                                        self->fd_page_file, 0);
+                mmap_end = self->page_data + (self->num_pages) * PAGE_SIZE;
 
                 success = false;
                 return success;
@@ -216,7 +220,16 @@ uint64_t page_cache_fetch(page_cache_t *self, uint64_t page, bool *success, bool
 /* FIXME */
 uint64_t page_cache_fetch2(page_cache_t *self, uint64_t page, bool *success)
 {
-    return page_cache_fetch(self, page, success, false);
+    uint64_t last_addr = page_cache_fetch(self, page, success, false);
+    if(__builtin_expect((last_addr > (uint64_t)mmap_end || last_addr < (uint64_t)self->page_data), 0)){
+        if(last_addr != 0){
+            *success = false;
+            nyx_warn("got illegal address %lx\n", last_addr);
+        }
+
+    }
+
+    return last_addr;
 }
 
 page_cache_t *page_cache_new(CPUState *cpu, const char *cache_file)
@@ -299,7 +312,7 @@ bool page_cache_disassemble_iter(page_cache_t       *self,
     bool   success   = true;
     size_t code_size = 16;
 
-    uint8_t *code     = (uint8_t *)page_cache_fetch(self, *address, &success, false);
+    uint8_t *code     = (uint8_t *)page_cache_fetch2(self, *address, &success);
     uint8_t *code_ptr = 0;
 
 
@@ -328,7 +341,7 @@ bool page_cache_disassemble_iter(page_cache_t       *self,
         memcpy((void *)self->disassemble_cache,
                (void *)((uint64_t)code + (0x1000 - 16)), 16);
         code_ptr = self->disassemble_cache + 0xf - (0xfff - (*address & 0xfff));
-        code = (uint8_t *)page_cache_fetch(self, *address + 0x1000, &success, false);
+        code = (uint8_t *)page_cache_fetch2(self, *address + 0x1000, &success);
 
         if (success == true) {
             memcpy((void *)(self->disassemble_cache + 16), (void *)code, 16);
